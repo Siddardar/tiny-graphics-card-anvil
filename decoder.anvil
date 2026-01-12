@@ -1,0 +1,127 @@
+enum instr_opcodes {
+    NOP, 
+
+    ADD, SUB, XOR, 
+
+    SLL, SRL, ADDI, SUBI, LW, SW, BEQ, BNE,
+
+    LUI, TID, JMP,
+
+    WSYNC // for GPU to wait? 
+}
+
+struct decoder_input {
+    instr: logic[16]
+}
+
+struct decoder_output {
+    alu_op: logic[4],
+
+    rd: logic[3],
+    rs: logic[3],
+    rt: logic[3],
+    
+    imm: logic[6],
+    imm_special: logic[8], // for LUI
+    target: logic[12],
+
+    // Control flags
+    use_imm: logic,
+    use_imm_special: logic,
+    use_target: logic,
+    is_mem_op: logic,
+    reg_write: logic
+}
+
+struct flags_t { 
+    use_imm: logic, use_imm_spec: logic, 
+    use_tgt: logic, is_mem: logic, rw: logic 
+}
+
+chan decoder_ch {
+    left req: (decoder_input @res),
+    right res: (decoder_output @#1)
+}
+
+proc decoder(ep: left decoder_ch) {
+    reg res: decoder_output;
+
+    loop {
+        let req = recv ep.req >>
+        let instr = req.instr >>
+
+        // Opcode: instr[15:12]
+        let opcode = <(instr >> 12) :: logic[4]> >>
+        
+        // rd: instr[11:9]
+        let rd = <(instr >> 9) :: logic[3]> >>
+        
+        // rs: instr[8:6]
+        let rs = <(instr >> 6) :: logic[3]> >>
+        
+        // rt: instr[2:0]
+        let rt = <(instr) :: logic[3]> >>
+        
+        // imm 6-bit: instr[5:0] (I-Type)
+        let imm6 = <(instr) :: logic[6]> >>
+
+        // imm 8-bit: instr[7:0] (LUI)
+        let imm8 = <(instr) :: logic[8]> >>
+
+        // Jump Target 12-bit: instr[11:0]
+        let target = <(instr) :: logic[12]> >>
+
+        let flags = match (<(opcode) :: instr_opcodes>) {
+            // R-Type
+            instr_opcodes::ADD => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::SUB => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::XOR => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::SLL => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::SRL => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+
+            // I-Type
+            instr_opcodes::ADDI => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::SUBI => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+
+            // Memory
+            instr_opcodes::LW   => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b1; rw=1'b1 },
+            instr_opcodes::SW   => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b1; rw=1'b0 },
+
+            // Branches
+            instr_opcodes::BEQ  => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b0 },
+            instr_opcodes::BNE  => flags_t::{ use_imm=1'b1; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b0 },
+
+            // Specials
+            instr_opcodes::LUI  => flags_t::{ use_imm=1'b0; use_imm_spec=1'b1; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+            instr_opcodes::TID  => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b1 },
+
+            // Jumps
+            instr_opcodes::JMP  => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b1; is_mem=1'b0; rw=1'b0 },
+
+            // Default
+            _ => flags_t::{ use_imm=1'b0; use_imm_spec=1'b0; use_tgt=1'b0; is_mem=1'b0; rw=1'b0 }
+        } >>
+
+        set res := decoder_output::{
+            alu_op          = opcode;
+            rd              = rd;
+            rs              = rs;
+            rt              = rt;
+            imm             = imm6;
+            imm_special     = imm8;
+            target          = target;
+            
+            // Control Flags
+            use_imm         = flags.use_imm;
+            use_imm_special = flags.use_imm_spec;
+            use_target      = flags.use_tgt;
+            is_mem_op       = flags.is_mem;
+            reg_write       = flags.rw
+        } >>
+
+        // 5. Send result and wait
+        send ep.res (*res) >>
+        cycle 1
+    }
+}
+

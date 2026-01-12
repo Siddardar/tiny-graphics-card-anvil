@@ -1,0 +1,72 @@
+type coord_t = logic[10];
+
+struct vga_signals {
+    hsync:  logic,
+    vsync:  logic,
+    active: logic,
+    x:      coord_t,
+    y:      coord_t
+}
+
+chan vga_ch {
+    left req: (logic @res),
+    right res: (vga_signals @#1)
+}
+
+proc vga_controller(ep: left vga_ch) {
+    reg h_count: coord_t;
+    reg v_count: coord_t;
+    reg out_buf: vga_signals;
+
+    loop {
+        let _ = recv ep.req >>
+
+        let hc = <(*h_count) :: coord_t> >>
+        let vc = <(*v_count) :: coord_t> >>
+
+        let C_640 = <(10'd640) :: coord_t> >>
+        let C_480 = <(10'd480) :: coord_t> >>
+        
+        let h_active = (hc < C_640) >>
+        let v_active = (vc < C_480) >>
+        let is_active = h_active & v_active >>
+
+        let h_sync_active = (hc >= <(10'd656)::coord_t>) & (hc < <(10'd752)::coord_t>) >>
+        let hsync = ~h_sync_active >>
+
+        let v_sync_active = (vc >= <(10'd490)::coord_t>) & (vc < <(10'd492)::coord_t>) >>
+        let vsync = ~v_sync_active >>
+
+        let next_h = if (hc == <(10'd799)::coord_t>) { 
+             <(10'd0)::coord_t> 
+        } else { 
+             <(hc + <(10'd1)::coord_t>) :: coord_t> 
+        } >>
+
+        let next_v = if ((hc == <(10'd799)::coord_t>) & (vc == <(10'd524)::coord_t>)) {
+             <(10'd0)::coord_t>
+        } else if (hc == <(10'd799)::coord_t>) {
+             <(vc + <(10'd1)::coord_t>) :: coord_t>
+        } else {
+             vc // No change
+        } >>
+
+
+        let x_out = if (h_active) { hc } else { <(10'd0)::coord_t> } >>
+        let y_out = if (v_active) { vc } else { <(10'd0)::coord_t> } >>
+
+        set h_count := next_h; 
+        set v_count := next_v >>
+        
+        set out_buf := vga_signals::{
+            hsync  = hsync;
+            vsync  = vsync;
+            active = is_active;
+            x      = x_out;
+            y      = y_out
+        } >>
+
+        send ep.res (*out_buf) >>
+        cycle 1
+    }
+}

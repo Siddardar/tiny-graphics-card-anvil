@@ -1,0 +1,52 @@
+enum alu_opcodes {
+    ADD, SUB, XOR, SLL, SRL, TID, LUI
+}
+
+struct alu_input {
+    a: logic[16],
+    b: logic[16],
+    opcode: alu_opcodes,
+    tid: logic[3]
+}
+
+struct alu_output {
+    val: logic[16],
+    zero: logic
+}
+
+chan alu_ch {
+    left req: (alu_input @res),
+    right res: (alu_output @#1) 
+}
+
+proc alu(ep: left alu_ch) {
+
+    reg res: alu_output;
+
+    loop {
+        let cmd = recv ep.req >>
+
+        let res_val = match(cmd.opcode) {
+            alu_opcodes::ADD => cmd.a + cmd.b,
+            alu_opcodes::SUB => cmd.a - cmd.b,
+            alu_opcodes::XOR => cmd.a ^ cmd.b,
+            alu_opcodes::SLL => cmd.a << cmd.b,
+            alu_opcodes::SRL => cmd.a >> cmd.b,
+            alu_opcodes::LUI => #{ <(cmd.b)::logic[8]>, 8'd0 },
+
+            _ => 16'd0
+        } >>
+
+        let zero_flag = (res_val == 16'd0) >>
+
+        set res := alu_output::{
+            val = res_val;
+            zero = zero_flag
+        }>>
+
+        send ep.res (*res) >> 
+
+        cycle 1
+
+    }
+}

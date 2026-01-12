@@ -1,0 +1,48 @@
+type word = (logic[16]);
+type reg_addr = (logic[3]);
+
+struct reg_file_req {
+    rs_addr: reg_addr,
+    rt_addr: reg_addr,
+    rd_addr: reg_addr,
+    
+    write_data: word,
+    write_enabled: logic
+}
+
+struct reg_file_res {
+    rs_data: word,
+    rt_data: word,
+    rd_data: word
+}
+
+chan reg_file_ch {
+    left req: (reg_file_req @res),
+    
+    right res: (reg_file_res @#1)
+}
+
+proc register_file(ep: left reg_file_ch) {
+    reg registers: word[8];
+
+    reg out_buf: reg_file_res;
+
+    loop {
+        let cmd = recv ep.req >>
+
+        set out_buf := reg_file_res::{
+            rs_data = *registers[cmd.rs_addr]; // getting a warning here is. better way?
+            rt_data = *registers[cmd.rt_addr];
+            rd_data = *registers[cmd.rd_addr]
+        } >>
+
+        // Read first -> lock gone -> then write
+        if (cmd.write_enabled) {
+            set registers[cmd.rd_addr] := cmd.write_data
+        } >>
+
+        send ep.res (*out_buf) >>
+        
+        cycle 1
+    }
+}

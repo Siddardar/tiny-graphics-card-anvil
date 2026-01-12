@@ -1,0 +1,66 @@
+type byte   = logic[8];
+type addr_t = logic[12]; // 4096 pixels = 12-bit address
+
+struct vram_inputs {
+    vsync: logic,
+    
+    we:   logic[8],
+    addr: addr_t[8],
+    data: byte[8],
+
+    read_addr: addr_t
+}
+
+struct vram_outputs {
+    data_out: byte,
+    curr_buffer: logic
+}
+
+chan vram_ch {
+    left req: (vram_inputs @res),
+    right res: (vram_outputs @#1)
+}
+
+proc vram (ep: left vram_ch) {
+    reg buffers: byte[2][4096];
+
+    reg front_idx: logic;
+    reg vsync_prev: logic;
+    reg out_buf: vram_outputs;
+
+    loop {
+        let cmd = recv ep.req >>
+        
+        // Only swap when curr = 1 and prev = 0 -> prevent swapping more than
+        // once when curr = 1
+        let vsync_rising = (cmd.vsync == 1'b1) & (*vsync_prev == 1'b0) >>
+        
+        set vsync_prev := cmd.vsync >>
+
+        if (vsync_rising) {
+            set front_idx := ~(*front_idx)
+        } >>
+
+        let f_idx = *front_idx >>
+        let b_idx = ~(*front_idx) >>
+
+        generate (i: 0, 7, 1) {
+            // doesn't work because ur borrowing the entire array instead of the index
+            // fix: map each core to one mem bank?
+
+            let we_bit = <(cmd.we >> i) :: logic[1]> >> 
+            
+            if (we_bit) {
+                set buffers[b_idx][cmd.addr[i]] := cmd.data[i]
+            }
+        } >>
+
+        set out_buf := vram_outputs::{
+            data_out = *buffers[f_idx][cmd.read_addr]
+            curr_buffer = *front_idx
+        } >>
+
+        send ep.res (*out_buf) >>
+        cycle 1
+    }
+}

@@ -56,7 +56,7 @@ proc vram (ep: left vram_ch) {
         } >>
 
         set out_buf := vram_outputs::{
-            data_out = *buffers[f_idx][cmd.read_addr]
+            data_out = *buffers[f_idx][cmd.read_addr];
             curr_buffer = *front_idx
         } >>
 

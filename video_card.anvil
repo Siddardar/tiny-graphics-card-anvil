@@ -1,0 +1,83 @@
+import "vga_controller.anvil"
+import "vram.anvil"
+
+type byte   = logic[8];
+type addr_t = logic[12]; // 4096 pixels
+
+struct gpu_cmd_t {
+    we:   logic[8],
+    addr: addr_t[8],
+    data: byte[8]
+}
+
+struct video_output {
+    hsync:  logic,
+    vsync:  logic,
+    active: logic,
+    color:  byte
+}
+
+chan video_card_ch {
+    left req: (gpu_cmd_t @res),
+    right res: (video_output @#1)
+}
+
+proc video_card(ep: left video_card_ch) {
+    chan vga_le -- vga_ri : vga_ch;
+    chan vram_le -- vram_ri : vram_ch;
+
+    spawn vga_controller(vga_le);
+    spawn vram(vram_le);
+
+    reg vga_latch: vga_signals; 
+    
+    reg out_buf: video_output;
+
+    loop {
+        let cmd = recv ep.req >>
+        
+        send vga_ri.req (1'b1) >>
+        let vga_wire = recv vga_ri.res >>
+        
+        set vga_latch := vga_wire >>
+
+        let gpu_x = <((*vga_latch.x) >> 3) :: logic[6]> >>
+        let gpu_y = <((*vga_latch.y) >> 3) :: logic[6]> >>
+
+        let y_wide = <(gpu_y) :: logic[12]> >>
+        let x_wide = <(gpu_x) :: logic[12]> >>
+        
+        let read_addr = <( (y_wide << 12'd6) | x_wide ) :: addr_t> >>
+        let vram_input = vram_inputs::{
+            vsync     = *vga_latch.vsync;
+            we        = cmd.we;
+            addr      = cmd.addr;
+            data      = cmd.data;
+            read_addr = read_addr
+        } >>
+
+        send vram_ri.req (vram_input) >>
+        let vram = recv vram_ri.res >>
+
+        let h_active = (*vga_latch.x < 10'd512) >>
+        let v_active = (*vga_latch.y < 10'd512) >>
+        
+        let pixel_active = *vga_latch.active & h_active & v_active >>
+
+        let final_color = if (pixel_active) { 
+            vram.data_out 
+        } else { 
+            8'd0 
+        } >>
+
+        set out_buf := video_output::{
+            hsync  = *vga_latch.hsync;
+            vsync  = *vga_latch.vsync;
+            active = pixel_active;
+            color  = final_color
+        } >>
+
+        send ep.res (*out_buf) >>
+        cycle 1
+    }
+}

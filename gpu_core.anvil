@@ -1,0 +1,138 @@
+import "decoder.anvil"       
+import "alu.anvil"        
+import "register_file.anvil" 
+
+type word_t = logic[16];
+type reg_id = logic[3];
+type tid_t  = logic[3];
+
+struct mem_req_t {
+    we:   logic,
+    addr: word_t,
+    data: word_t
+}
+
+struct instr_packet {
+    raw: word_t,
+    tid: tid_t
+}
+
+struct branch_update {
+    take_branch: logic,
+    target:      logic[12]
+}
+
+
+chan core_mem_ch {
+    left req: (mem_req_t @res),
+    right res: (word_t @#1)
+}
+
+chan fetch_ch {
+    left req: (branch_update @res),
+    right res: (instr_packet @#1)
+}
+
+proc gpu_core(
+    mem: right core_mem_ch, 
+    fetch: right fetch_ch
+) {
+    chan dec_le -- dec_ri : decoder_ch;
+    chan alu_le -- alu_ri : alu_ch;
+    chan rf_le  -- rf_ri  : reg_file_ch;
+
+    spawn decoder(dec_le);
+    spawn alu(alu_le);
+    spawn register_file(rf_le);
+
+    reg next_branch_info: branch_update;
+
+    loop {
+        send fetch.req (*next_branch_info) >> 
+        let pkt = recv fetch.res >>
+        
+        let instr = pkt.raw >>
+        let tid   = pkt.tid >>
+
+        send dec_ri.req (decoder_input::{ instr = instr }) >>
+        let ctrl = recv dec_ri.res >>
+
+        let is_store  = ctrl.is_mem_op & ~ctrl.reg_write >> // SW has mem_op=1, rw=0
+        let is_branch = ctrl.alu_op == 4'd10 | ctrl.alu_op == 4'd11 >> // BEQ/BNE
+        let is_jmp    = ctrl.alu_op == 4'd14 >>
+
+        let final_rt = if (is_store) { ctrl.rd } else { ctrl.rt } >>
+
+        let rf_req = rf_read_req::{
+            rs_addr = ctrl.rs;
+            rt_addr = final_rt;
+            rd_addr = ctrl.rd
+        } >>
+
+        send rf_ri.read_req (rf_req) >>
+        let regs = recv rf_ri.read_res >>
+
+        let alu_a = if (is_branch) { regs.rd_data } else { regs.rs_data } >>
+
+        let imm_ext = <(ctrl.imm) :: word_t> >>
+        let imm_sp_ext = <(ctrl.imm_special) :: word_t> >>
+
+        let alu_b = if (is_branch) {
+            regs.rs_data
+        } else if (ctrl.use_imm) {
+            imm_ext
+        } else if (ctrl.use_imm_special) {
+            imm_sp_ext
+        } else {
+            regs.rt_data
+        } >>
+
+        let alu_in = alu_inputs::{
+            op  = ctrl.alu_op;
+            a   = alu_a;
+            b   = alu_b;
+            tid = tid
+        } >>
+
+        send alu_ri.req (alu_in) >>
+        let alu_out = recv alu_ri.res >>
+
+        let res  = alu_out.res >>
+        let zero = alu_out.zero >>
+
+        let take_b = if (is_jmp) { 1'b1 }
+                else if (ctrl.alu_op == 4'd10) { zero }  // BEQ
+                else if (ctrl.alu_op == 4'd11) { ~zero } // BNE
+                else { 1'b0 } >>
+
+        let target = if (is_jmp) { ctrl.target } else { <(ctrl.imm)::logic[12]> } >>
+        
+        set next_branch_info := branch_update::{
+            take_branch = take_b;
+            target      = target
+        } >>
+
+        let mem_req = mem_req_t::{
+            we   = is_store;
+            addr = res;
+            data = regs.rt_data
+        } >>
+
+        send mem.req (mem_req) >>
+        
+        let mem_data = recv mem.res >>
+
+        let wb_val = if (ctrl.is_mem_op) { mem_data } else { res } >>
+
+        let wb_req = rf_write_req::{
+            we   = ctrl.reg_write;
+            addr = ctrl.rd;
+            data = wb_val
+        } >>
+
+        send rf_ri.write_req (wb_req) >>
+        let _ = recv rf_ri.done >>
+
+        cycle 1
+    }
+}

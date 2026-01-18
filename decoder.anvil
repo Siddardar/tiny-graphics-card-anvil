@@ -119,7 +119,6 @@ proc decoder(ep: left decoder_ch) {
             reg_write       = flags.rw
         } >>
 
-        // 5. Send result and wait
         send ep.res (*res) >>
         cycle 1
     }

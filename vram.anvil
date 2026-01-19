@@ -44,9 +44,9 @@ proc vram (ep: left vram_ch) {
         let f_idx = *front_idx >>
         let b_idx = ~(*front_idx) >>
 
-        generate (i: 0, 7, 1) {
-            // doesn't work because ur borrowing the entire array instead of the index
-            // fix: map each core to one mem bank?
+        generate_seq (i: 0, 7, 1) {
+            // temp fix: sequentially update vram -> writing takes 8 cycles instead of 1 cycle
+            // figure out how to go back to 1 cycle -> through maybe slicing
 
             let we_bit = <(cmd.we >> i) :: logic[1]> >> 
             

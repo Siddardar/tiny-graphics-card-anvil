@@ -1,0 +1,135 @@
+import "gpu_core.anvil"
+import "video_card.anvil"
+
+chan monitor_ch {
+    left req: (video_output @res), 
+    right res: (logic @#1)         
+}
+
+chan fetch_bus_ch {
+    left req: (branch_update @res),
+    right res: (instr_packet @#1)
+}
+
+proc gpu(
+    monitor: left monitor_ch 
+) {
+    chan vid_le -- vid_ri : video_card_ch;
+
+    chan c0_mem_le -- c0_mem_ri : core_mem_ch;
+    chan c0_ft_le  -- c0_ft_ri  : fetch_bus_ch;
+
+    chan c1_mem_le -- c1_mem_ri : core_mem_ch;
+    chan c1_ft_le  -- c1_ft_ri  : fetch_bus_ch;
+
+    chan c2_mem_le -- c2_mem_ri : core_mem_ch;
+    chan c2_ft_le  -- c2_ft_ri  : fetch_bus_ch;
+
+    chan c3_mem_le -- c3_mem_ri : core_mem_ch;
+    chan c3_ft_le  -- c3_ft_ri  : fetch_bus_ch;
+
+    chan c4_mem_le -- c4_mem_ri : core_mem_ch;
+    chan c4_ft_le  -- c4_ft_ri  : fetch_bus_ch;
+
+    chan c5_mem_le -- c5_mem_ri : core_mem_ch;
+    chan c5_ft_le  -- c5_ft_ri  : fetch_bus_ch;
+    
+    chan c6_mem_le -- c6_mem_ri : core_mem_ch;
+    chan c6_ft_le  -- c6_ft_ri  : fetch_bus_ch;
+    
+    chan c7_mem_le -- c7_mem_ri : core_mem_ch;
+    chan c7_ft_le  -- c7_ft_ri  : fetch_bus_ch;
+
+    spawn video_card(vid_ri);
+
+    spawn gpu_core(c0_mem_ri, c0_ft_ri);
+    spawn gpu_core(c1_mem_ri, c1_ft_ri);
+    spawn gpu_core(c2_mem_ri, c2_ft_ri);
+    spawn gpu_core(c3_mem_ri, c3_ft_ri);
+    spawn gpu_core(c4_mem_ri, c4_ft_ri);
+    spawn gpu_core(c5_mem_ri, c5_ft_ri);
+    spawn gpu_core(c6_mem_ri, c6_ft_ri);
+    spawn gpu_core(c7_mem_ri, c7_ft_ri);
+
+    loop {
+        let br0 = recv c0_ft_le.req >>
+        let pkt0 = instr_packet::{ raw = 16'h0000; tid = 3'd0 } >>
+        send c0_ft_le.res (pkt0) >>
+
+        let br1 = recv c1_ft_le.req >>
+        let pkt1 = instr_packet::{ raw = 16'h0000; tid = 3'd1 } >>
+        send c1_ft_le.res (pkt1) >>
+
+        let br2 = recv c2_ft_le.req >>
+        let pkt2 = instr_packet::{ raw = 16'h0000; tid = 3'd2 } >>
+        send c2_ft_le.res (pkt2) >>
+
+        let br3 = recv c3_ft_le.req >>
+        let pkt3 = instr_packet::{ raw = 16'h0000; tid = 3'd3 } >>
+        send c3_ft_le.res (pkt3) >>
+
+        let br4 = recv c4_ft_le.req >>
+        let pkt4 = instr_packet::{ raw = 16'h0000; tid = 3'd4 } >>
+        send c4_ft_le.res (pkt4) >>
+
+        let br5 = recv c5_ft_le.req >>
+        let pkt5 = instr_packet::{ raw = 16'h0000; tid = 3'd5 } >>
+        send c5_ft_le.res (pkt5) >>
+
+        let br6 = recv c6_ft_le.req >>
+        let pkt6 = instr_packet::{ raw = 16'h0000; tid = 3'd6 } >>
+        send c6_ft_le.res (pkt6) >>
+
+        let br7 = recv c7_ft_le.req >>
+        let pkt7 = instr_packet::{ raw = 16'h0000; tid = 3'd7 } >>
+        send c7_ft_le.res (pkt7) >>
+
+        let c0 = recv c0_mem_le.req >>
+        let c1 = recv c1_mem_le.req >>
+        let c2 = recv c2_mem_le.req >>
+        let c3 = recv c3_mem_le.req >>
+        let c4 = recv c4_mem_le.req >>
+        let c5 = recv c5_mem_le.req >>
+        let c6 = recv c6_mem_le.req >>
+        let c7 = recv c7_mem_le.req >>
+
+        let we_combined = (
+              (c0.we << 0) | (c1.we << 1) | (c2.we << 2) | (c3.we << 3) |
+              (c4.we << 4) | (c5.we << 5) | (c6.we << 6) | (c7.we << 7)
+        ) >>
+
+        let addr_arr = [
+            <(c0.addr)::addr_t>, <(c1.addr)::addr_t>, <(c2.addr)::addr_t>, <(c3.addr)::addr_t>,
+            <(c4.addr)::addr_t>, <(c5.addr)::addr_t>, <(c6.addr)::addr_t>, <(c7.addr)::addr_t>
+        ] >>
+
+        let data_arr = [
+            <(c0.data)::byte>, <(c1.data)::byte>, <(c2.data)::byte>, <(c3.data)::byte>,
+            <(c4.data)::byte>, <(c5.data)::byte>, <(c6.data)::byte>, <(c7.data)::byte>
+        ] >>
+
+        let vid_cmd = gpu_cmd_t::{
+            we   = <(we_combined) :: logic[8]>;
+            addr = addr_arr;
+            data = data_arr
+        } >>
+
+        send vid_le.req (vid_cmd) >>
+        let vga_signals = recv vid_le.res >>
+
+        let ack = 16'd0 >>
+        send c0_mem_le.res (ack) >>
+        send c1_mem_le.res (ack) >>
+        send c2_mem_le.res (ack) >>
+        send c3_mem_le.res (ack) >>
+        send c4_mem_le.res (ack) >>
+        send c5_mem_le.res (ack) >>
+        send c6_mem_le.res (ack) >>
+        send c7_mem_le.res (ack) >>
+
+        send monitor.req (vga_signals) >>
+        let _ = recv monitor.res >>
+
+        cycle 1
+    }
+}

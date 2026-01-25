@@ -1,44 +1,53 @@
-type word = (logic[16]);
-type reg_addr = (logic[3]);
-
 struct reg_file_req {
-    rs_addr: reg_addr,
-    rt_addr: reg_addr,
-    rd_addr: reg_addr,
+    rs_addr: logic[3],
+    rt_addr: logic[3],
+    rd_addr: logic[3],
     
-    write_data: word,
+    write_data: logic[16],
     write_enabled: logic
 }
 
 struct reg_file_res {
-    rs_data: word,
-    rt_data: word,
-    rd_data: word
+    rs_data: logic[16],
+    rt_data: logic[16],
+    rd_data: logic[16]
 }
 
 chan reg_file_ch {
     left req: (reg_file_req @res),
-    
     right res: (reg_file_res @#1)
 }
 
 proc register_file(ep: left reg_file_ch) {
-    reg registers: word[8];
-
+    // 8 registers, 16 bits wide
+    reg registers: logic[8][16];
     reg out_buf: reg_file_res;
 
     loop {
         let cmd = recv ep.req >>
 
-        set out_buf := reg_file_res::{
-            rs_data = *registers[cmd.rs_addr]; // getting a warning here is. better way?
-            rt_data = *registers[cmd.rt_addr];
-            rd_data = *registers[cmd.rd_addr]
-        } >>
+        let rs_addr = cmd.rs_addr >>
+        let rt_addr = cmd.rt_addr >>
+        let rd_addr = cmd.rd_addr >>
+        
+        let w_data  = <(cmd.write_data) :: logic[16]> >> 
+        let w_en    = <(cmd.write_enabled) :: logic> >>
 
-        // Read first -> lock gone -> then write
-        if (cmd.write_enabled) {
-            set registers[cmd.rd_addr] := cmd.write_data
+        {
+            // Explicitly cast the read results too, just to be safe
+            let val_rs = <(*registers[rs_addr]) :: logic[16]> >>
+            let val_rt = <(*registers[rt_addr]) :: logic[16]> >>
+            let val_rd = <(*registers[rd_addr]) :: logic[16]> >>
+
+            set out_buf := reg_file_res::{
+                rs_data = val_rs;
+                rt_data = val_rt;
+                rd_data = val_rd
+            }
+        } >> 
+
+        if (w_en) {
+            set registers[rd_addr] := w_data
         } >>
 
         send ep.res (*out_buf) >>
